@@ -28,7 +28,50 @@ local textures = {
     ["Star"] = "Interface\\Cooldown\\star4",
     ["Rune"] = "Interface\\PlayerFrame\\UI-PlayerFrame-Deathknight-Ring",
     ["Holy Glow"] = "Interface\\Cooldown\\ping4",
+    ["Diamond"] = "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight",
+    
+    -- From CursorTrail addon (FileDataIDs work with WoW 12.0)
+    ["Bug (Blue)"] = 605711,
+    ["Bug (Orange)"] = 2447131,
+    ["Frame (Gold)"] = 237701,
+    ["Frame (Gold 3D)"] = 618870,
+    ["Glow (Gold)"] = 607860,
+    ["Glyph (Green)"] = 136841,
+    ["Ring (Arcane)"] = "Interface\\UnitPowerBarAlt\\Arcane_Circular_Frame",
+    ["Ring (Fire)"] = "Interface\\UnitPowerBarAlt\\Fire_Circular_Frame",
+    ["Ring (Gold)"] = 519888,
+    ["Ring (Gradient 1)"] = 4734120,
+    ["Ring (Gradient 5)"] = 4734114,
+    ["Ring (Horde)"] = 457585,
+    ["Ring (Ice)"] = 458995,
+    ["Shield (Alliance)"] = 457561,
+    ["Shield (Gold)"] = 607858,
 }
+
+-- Convert HSV to RGB (needed by Rainbow gradient)
+local function HSVtoRGB(h, s, v)
+    h = h % 360
+    local c = v * s
+    local x = c * (1 - math.abs((h / 60) % 2 - 1))
+    local m = v - c
+    
+    local r, g, b
+    if h < 60 then
+        r, g, b = c, x, 0
+    elseif h < 120 then
+        r, g, b = x, c, 0
+    elseif h < 180 then
+        r, g, b = 0, c, x
+    elseif h < 240 then
+        r, g, b = 0, x, c
+    elseif h < 300 then
+        r, g, b = x, 0, c
+    else
+        r, g, b = c, 0, x
+    end
+    
+    return r + m, g + m, b + m
+end
 
 -- Gradient presets
 local gradients = {
@@ -80,31 +123,6 @@ local gradients = {
     end,
 }
 
--- Convert HSV to RGB
-local function HSVtoRGB(h, s, v)
-    h = h % 360
-    local c = v * s
-    local x = c * (1 - math.abs((h / 60) % 2 - 1))
-    local m = v - c
-    
-    local r, g, b
-    if h < 60 then
-        r, g, b = c, x, 0
-    elseif h < 120 then
-        r, g, b = x, c, 0
-    elseif h < 180 then
-        r, g, b = 0, c, x
-    elseif h < 240 then
-        r, g, b = 0, x, c
-    elseif h < 300 then
-        r, g, b = x, 0, c
-    else
-        r, g, b = c, 0, x
-    end
-    
-    return r + m, g + m, b + m
-end
-
 -- Get the current texture path
 local function GetCurrentTexture()
     return textures[JarsCursorTrailDB.texture] or textures["Star"]
@@ -133,23 +151,25 @@ local function CreateTrailParticle(index)
     frame:SetFrameLevel(1000)
     frame:Hide()
     
+    -- Store particle index for gradient coloring
+    frame.particleIndex = index
+    
+    -- Create texture
     frame.texture = frame:CreateTexture(nil, "OVERLAY")
     frame.texture:SetAllPoints()
     frame.texture:SetTexture(GetCurrentTexture())
     frame.texture:SetBlendMode("ADD")
     
-    -- Store particle index for gradient coloring
-    frame.particleIndex = index
-    
     -- Set initial color
     local r, g, b = GetParticleColor(index, JarsCursorTrailDB.trailLength)
     frame.texture:SetVertexColor(r, g, b, JarsCursorTrailDB.alpha)
     
-    frame.startTime = 0
-    frame.startAlpha = JarsCursorTrailDB.alpha
     frame.baseR = r
     frame.baseG = g
     frame.baseB = b
+    
+    frame.startTime = 0
+    frame.startAlpha = JarsCursorTrailDB.alpha
     
     return frame
 end
@@ -193,7 +213,7 @@ local function UpdateTrail()
             local offsetY = JarsCursorTrailDB.offsetY or 0
             frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x + offsetX, y + offsetY)
             
-            -- Update color if rainbow mode
+            -- Update color for gradient mode
             local r, g, b = GetParticleColor(frame.particleIndex, JarsCursorTrailDB.trailLength)
             frame.baseR = r
             frame.baseG = g
@@ -226,8 +246,11 @@ local function UpdateTrail()
             else
                 -- Fade out with easing
                 local alpha = frame.startAlpha * (1 - fadeProgress)
-                -- Maintain color while fading
-                frame.texture:SetVertexColor(frame.baseR, frame.baseG, frame.baseB, alpha)
+                
+                -- Maintain color while fading textures
+                if frame.texture then
+                    frame.texture:SetVertexColor(frame.baseR, frame.baseG, frame.baseB, alpha)
+                end
                 
                 -- Optional: scale down as it fades
                 local scale = 1 - (fadeProgress * 0.3)
@@ -243,14 +266,17 @@ end
 -- Refresh all trail particles with current settings
 local function RefreshTrailParticles()
     for _, frame in ipairs(trailFrames) do
-        frame.texture:SetTexture(GetCurrentTexture())
-        
-        -- Update color based on mode
-        local r, g, b = GetParticleColor(frame.particleIndex, JarsCursorTrailDB.trailLength)
-        frame.baseR = r
-        frame.baseG = g
-        frame.baseB = b
-        frame.texture:SetVertexColor(r, g, b, JarsCursorTrailDB.alpha)
+        -- Update texture
+        if frame.texture then
+            frame.texture:SetTexture(GetCurrentTexture())
+            
+            -- Update color based on gradient mode
+            local r, g, b = GetParticleColor(frame.particleIndex, JarsCursorTrailDB.trailLength)
+            frame.baseR = r
+            frame.baseG = g
+            frame.baseB = b
+            frame.texture:SetVertexColor(r, g, b, JarsCursorTrailDB.alpha)
+        end
         
         frame:SetSize(JarsCursorTrailDB.size, JarsCursorTrailDB.size)
     end
@@ -595,6 +621,8 @@ local function CreateConfigWindow()
         -- Update UI
         enableCheck:SetChecked(true)
         rainbowCheck:SetChecked(false)
+        rainbowCheck:Enable()
+        rainbowCheck:SetAlpha(1)
         lengthSlider:SetValue(10)
         fadeSlider:SetValue(0.5)
         sizeSlider:SetValue(32)
