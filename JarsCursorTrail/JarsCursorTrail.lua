@@ -12,32 +12,121 @@ JarsCursorTrailDB = JarsCursorTrailDB or {
     trailLength = 10,
     fadeTime = 0.5,
     updateInterval = 0.03,
-    texture = "Spark",
+    texture = "Star",
     size = 32,
     spacing = 20,
+    offsetX = 0,
+    offsetY = 0,
     color = {r = 1, g = 1, b = 1},
-    alpha = 1.0
+    alpha = 1.0,
+    rainbowMode = false,
+    gradientType = "Fire"
 }
 
 -- Available textures
 local textures = {
-    ["Spark"] = "Interface\\CastingBar\\UI-CastingBar-Spark",
     ["Star"] = "Interface\\Cooldown\\star4",
-    ["Glow"] = "Interface\\SpellActivationOverlay\\IconAlert",
-    ["Circle"] = "Interface\\Common\\WhiteCircle",
-    ["Ring"] = "Interface\\Artifacts\\ArtifactPower-QuestBorder",
     ["Rune"] = "Interface\\PlayerFrame\\UI-PlayerFrame-Deathknight-Ring",
-    ["Diamond"] = "Interface\\Buttons\\WHITE8X8",
-    ["Starburst"] = "Interface\\PetBattles\\PetBattle-StatIcons",
+    ["Holy Glow"] = "Interface\\Cooldown\\ping4",
 }
+
+-- Gradient presets
+local gradients = {
+    ["Rainbow"] = function(position)
+        -- HSV rainbow: position 0-1 maps to hue 0-360
+        local hue = position * 360
+        return HSVtoRGB(hue, 1, 1)
+    end,
+    ["Fire"] = function(position)
+        -- Red → Orange → Yellow → Orange → Red
+        -- Mirror at halfway point
+        local t = position <= 0.5 and (position * 2) or (2 - position * 2)
+        if t < 0.5 then
+            return 1, t * 2, 0  -- Red to Orange
+        else
+            local s = (t - 0.5) * 2
+            return 1, 1, s  -- Orange to Yellow
+        end
+    end,
+    ["Ice"] = function(position)
+        -- Cyan → Blue → Purple → Blue → Cyan
+        -- Mirror at halfway point
+        local t = position <= 0.5 and (position * 2) or (2 - position * 2)
+        if t < 0.5 then
+            local s = t * 2
+            return 1-s, 1, 1  -- Cyan to Blue
+        else
+            local s = (t - 0.5) * 2
+            return 0.5*s, 0, 1  -- Blue to Purple
+        end
+    end,
+    ["Toxic"] = function(position)
+        -- Green → Yellow → Green
+        -- Mirror at halfway point for smooth pulse
+        local t = position <= 0.5 and (position * 2) or (2 - position * 2)
+        return t, 1, 0
+    end,
+    ["Arcane"] = function(position)
+        -- Purple → Pink → Blue → Pink → Purple
+        -- Mirror at halfway point
+        local t = position <= 0.5 and (position * 2) or (2 - position * 2)
+        if t < 0.5 then
+            local s = t * 2
+            return 0.5 + s*0.5, 0, 1  -- Purple to Pink
+        else
+            local s = (t - 0.5) * 2
+            return 1-s*0.5, 0, 1  -- Pink to Blue
+        end
+    end,
+}
+
+-- Convert HSV to RGB
+local function HSVtoRGB(h, s, v)
+    h = h % 360
+    local c = v * s
+    local x = c * (1 - math.abs((h / 60) % 2 - 1))
+    local m = v - c
+    
+    local r, g, b
+    if h < 60 then
+        r, g, b = c, x, 0
+    elseif h < 120 then
+        r, g, b = x, c, 0
+    elseif h < 180 then
+        r, g, b = 0, c, x
+    elseif h < 240 then
+        r, g, b = 0, x, c
+    elseif h < 300 then
+        r, g, b = x, 0, c
+    else
+        r, g, b = c, 0, x
+    end
+    
+    return r + m, g + m, b + m
+end
 
 -- Get the current texture path
 local function GetCurrentTexture()
-    return textures[JarsCursorTrailDB.texture] or textures["Spark"]
+    return textures[JarsCursorTrailDB.texture] or textures["Star"]
+end
+
+-- Get color for particle based on its position in trail
+local function GetParticleColor(index, totalParticles)
+    if not JarsCursorTrailDB.rainbowMode then
+        return JarsCursorTrailDB.color.r, JarsCursorTrailDB.color.g, JarsCursorTrailDB.color.b
+    end
+    
+    -- Calculate position in gradient (0 to 1)
+    local position = (index - 1) / math.max(1, totalParticles - 1)
+    
+    -- Get gradient function
+    local gradientFunc = gradients[JarsCursorTrailDB.gradientType] or gradients["Rainbow"]
+    
+    return gradientFunc(position)
 end
 
 -- Create trail particle
-local function CreateTrailParticle()
+local function CreateTrailParticle(index)
     local frame = CreateFrame("Frame", nil, UIParent)
     frame:SetSize(JarsCursorTrailDB.size, JarsCursorTrailDB.size)
     frame:SetFrameStrata("TOOLTIP")
@@ -48,15 +137,19 @@ local function CreateTrailParticle()
     frame.texture:SetAllPoints()
     frame.texture:SetTexture(GetCurrentTexture())
     frame.texture:SetBlendMode("ADD")
-    frame.texture:SetVertexColor(
-        JarsCursorTrailDB.color.r,
-        JarsCursorTrailDB.color.g,
-        JarsCursorTrailDB.color.b,
-        JarsCursorTrailDB.alpha
-    )
+    
+    -- Store particle index for gradient coloring
+    frame.particleIndex = index
+    
+    -- Set initial color
+    local r, g, b = GetParticleColor(index, JarsCursorTrailDB.trailLength)
+    frame.texture:SetVertexColor(r, g, b, JarsCursorTrailDB.alpha)
     
     frame.startTime = 0
     frame.startAlpha = JarsCursorTrailDB.alpha
+    frame.baseR = r
+    frame.baseG = g
+    frame.baseB = b
     
     return frame
 end
@@ -70,9 +163,9 @@ local function InitializeTrailFrames()
     end
     trailFrames = {}
     
-    -- Create new pool
+    -- Create new pool with index for gradient
     for i = 1, JarsCursorTrailDB.trailLength do
-        trailFrames[i] = CreateTrailParticle()
+        trailFrames[i] = CreateTrailParticle(i)
     end
 end
 
@@ -95,7 +188,18 @@ local function UpdateTrail()
         local frame = trailFrames[trailIndex]
         
         if frame then
-            frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+            -- Apply offset
+            local offsetX = JarsCursorTrailDB.offsetX or 0
+            local offsetY = JarsCursorTrailDB.offsetY or 0
+            frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x + offsetX, y + offsetY)
+            
+            -- Update color if rainbow mode
+            local r, g, b = GetParticleColor(frame.particleIndex, JarsCursorTrailDB.trailLength)
+            frame.baseR = r
+            frame.baseG = g
+            frame.baseB = b
+            frame.texture:SetVertexColor(r, g, b, JarsCursorTrailDB.alpha)
+            
             frame:Show()
             frame.startTime = GetTime()
             frame.startAlpha = JarsCursorTrailDB.alpha
@@ -122,7 +226,8 @@ local function UpdateTrail()
             else
                 -- Fade out with easing
                 local alpha = frame.startAlpha * (1 - fadeProgress)
-                frame.texture:SetAlpha(alpha)
+                -- Maintain color while fading
+                frame.texture:SetVertexColor(frame.baseR, frame.baseG, frame.baseB, alpha)
                 
                 -- Optional: scale down as it fades
                 local scale = 1 - (fadeProgress * 0.3)
@@ -139,12 +244,14 @@ end
 local function RefreshTrailParticles()
     for _, frame in ipairs(trailFrames) do
         frame.texture:SetTexture(GetCurrentTexture())
-        frame.texture:SetVertexColor(
-            JarsCursorTrailDB.color.r,
-            JarsCursorTrailDB.color.g,
-            JarsCursorTrailDB.color.b,
-            JarsCursorTrailDB.alpha
-        )
+        
+        -- Update color based on mode
+        local r, g, b = GetParticleColor(frame.particleIndex, JarsCursorTrailDB.trailLength)
+        frame.baseR = r
+        frame.baseG = g
+        frame.baseB = b
+        frame.texture:SetVertexColor(r, g, b, JarsCursorTrailDB.alpha)
+        
         frame:SetSize(JarsCursorTrailDB.size, JarsCursorTrailDB.size)
     end
 end
@@ -154,7 +261,7 @@ local function CreateConfigWindow()
     if configFrame then return configFrame end
     
     configFrame = CreateFrame("Frame", "JarsCursorTrailConfig", UIParent, "BasicFrameTemplateWithInset")
-    configFrame:SetSize(400, 450)
+    configFrame:SetSize(400, 650)
     configFrame:SetPoint("CENTER")
     configFrame:SetMovable(true)
     configFrame:EnableMouse(true)
@@ -194,7 +301,7 @@ local function CreateConfigWindow()
     
     local lengthSlider = CreateFrame("Slider", nil, configFrame, "OptionsSliderTemplate")
     lengthSlider:SetPoint("TOPLEFT", 20, yOffset - 20)
-    lengthSlider:SetMinMaxValues(5, 30)
+    lengthSlider:SetMinMaxValues(5, 50)
     lengthSlider:SetValue(JarsCursorTrailDB.trailLength)
     lengthSlider:SetValueStep(1)
     lengthSlider:SetObeyStepOnDrag(true)
@@ -267,7 +374,42 @@ local function CreateConfigWindow()
         self.Text:SetText("Spacing: " .. JarsCursorTrailDB.spacing)
     end)
     
-    yOffset = yOffset - 60
+    yOffset = yOffset - 50
+    
+    -- X/Y Offset sliders side-by-side
+    local offsetLabel = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    offsetLabel:SetPoint("TOPLEFT", 20, yOffset)
+    offsetLabel:SetText("Trail Offset:")
+    
+    -- X Offset slider
+    local offsetXSlider = CreateFrame("Slider", nil, configFrame, "OptionsSliderTemplate")
+    offsetXSlider:SetPoint("TOPLEFT", 20, yOffset - 20)
+    offsetXSlider:SetMinMaxValues(-50, 50)
+    offsetXSlider:SetValue(JarsCursorTrailDB.offsetX or 0)
+    offsetXSlider:SetValueStep(1)
+    offsetXSlider:SetObeyStepOnDrag(true)
+    offsetXSlider:SetWidth(150)
+    offsetXSlider.Text:SetText("X: " .. (JarsCursorTrailDB.offsetX or 0))
+    offsetXSlider:SetScript("OnValueChanged", function(self, value)
+        JarsCursorTrailDB.offsetX = math.floor(value)
+        self.Text:SetText("X: " .. JarsCursorTrailDB.offsetX)
+    end)
+    
+    -- Y Offset slider (side-by-side with X)
+    local offsetYSlider = CreateFrame("Slider", nil, configFrame, "OptionsSliderTemplate")
+    offsetYSlider:SetPoint("LEFT", offsetXSlider, "RIGHT", 30, 0)
+    offsetYSlider:SetMinMaxValues(-50, 50)
+    offsetYSlider:SetValue(JarsCursorTrailDB.offsetY or 0)
+    offsetYSlider:SetValueStep(1)
+    offsetYSlider:SetObeyStepOnDrag(true)
+    offsetYSlider:SetWidth(150)
+    offsetYSlider.Text:SetText("Y: " .. (JarsCursorTrailDB.offsetY or 0))
+    offsetYSlider:SetScript("OnValueChanged", function(self, value)
+        JarsCursorTrailDB.offsetY = math.floor(value)
+        self.Text:SetText("Y: " .. JarsCursorTrailDB.offsetY)
+    end)
+    
+    yOffset = yOffset - 50
     
     -- Texture dropdown
     local textureLabel = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -344,7 +486,71 @@ local function CreateConfigWindow()
         ColorPickerFrame:SetupColorPickerAndShow(info)
     end)
     
+    -- Set initial state based on rainbow mode
+    if JarsCursorTrailDB.rainbowMode then
+        colorButton:Disable()
+        colorButton:SetAlpha(0.5)
+        colorLabel:SetTextColor(0.5, 0.5, 0.5)
+    end
+    
     yOffset = yOffset - 40
+    
+    -- Rainbow mode checkbox
+    local rainbowCheck = CreateFrame("CheckButton", nil, configFrame, "UICheckButtonTemplate")
+    rainbowCheck:SetPoint("TOPLEFT", 20, yOffset)
+    rainbowCheck:SetChecked(JarsCursorTrailDB.rainbowMode)
+    rainbowCheck.Text = rainbowCheck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    rainbowCheck.Text:SetPoint("LEFT", rainbowCheck, "RIGHT", 5, 0)
+    rainbowCheck.Text:SetText("Rainbow/Gradient Mode")
+    rainbowCheck:SetScript("OnClick", function(self)
+        JarsCursorTrailDB.rainbowMode = self:GetChecked()
+        RefreshTrailParticles()
+        -- Enable/disable color button and gradient dropdown
+        if JarsCursorTrailDB.rainbowMode then
+            colorButton:Disable()
+            colorButton:SetAlpha(0.5)
+            colorLabel:SetTextColor(0.5, 0.5, 0.5)
+        else
+            colorButton:Enable()
+            colorButton:SetAlpha(1)
+            colorLabel:SetTextColor(1, 1, 1)
+        end
+    end)
+    
+    yOffset = yOffset - 35
+    
+    -- Gradient type dropdown (only visible in rainbow mode)
+    local gradientLabel = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    gradientLabel:SetPoint("TOPLEFT", 20, yOffset)
+    gradientLabel:SetText("Gradient Type:")
+    
+    local gradientDropdown = CreateFrame("Frame", nil, configFrame, "UIDropDownMenuTemplate")
+    gradientDropdown:SetPoint("TOPLEFT", 10, yOffset - 25)
+    
+    UIDropDownMenu_SetWidth(gradientDropdown, 150)
+    UIDropDownMenu_SetText(gradientDropdown, JarsCursorTrailDB.gradientType)
+    
+    local function GradientDropdown_OnClick(self)
+        JarsCursorTrailDB.gradientType = self.value
+        UIDropDownMenu_SetText(gradientDropdown, self.value)
+        RefreshTrailParticles()
+    end
+    
+    local function GradientDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        local gradientNames = {"Fire", "Ice", "Toxic", "Arcane"}
+        for _, name in ipairs(gradientNames) do
+            info.text = name
+            info.value = name
+            info.func = GradientDropdown_OnClick
+            info.checked = (JarsCursorTrailDB.gradientType == name)
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end
+    
+    UIDropDownMenu_Initialize(gradientDropdown, GradientDropdown_Initialize)
+    
+    yOffset = yOffset - 65
     
     -- Alpha slider
     local alphaLabel = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -376,21 +582,32 @@ local function CreateConfigWindow()
         JarsCursorTrailDB.enabled = true
         JarsCursorTrailDB.trailLength = 10
         JarsCursorTrailDB.fadeTime = 0.5
-        JarsCursorTrailDB.texture = "Spark"
+        JarsCursorTrailDB.texture = "Star"
         JarsCursorTrailDB.size = 32
         JarsCursorTrailDB.spacing = 20
+        JarsCursorTrailDB.offsetX = 0
+        JarsCursorTrailDB.offsetY = 0
         JarsCursorTrailDB.color = {r = 1, g = 1, b = 1}
         JarsCursorTrailDB.alpha = 1.0
+        JarsCursorTrailDB.rainbowMode = false
+        JarsCursorTrailDB.gradientType = "Fire"
         
         -- Update UI
         enableCheck:SetChecked(true)
+        rainbowCheck:SetChecked(false)
         lengthSlider:SetValue(10)
         fadeSlider:SetValue(0.5)
         sizeSlider:SetValue(32)
         spacingSlider:SetValue(20)
+        offsetXSlider:SetValue(0)
+        offsetYSlider:SetValue(0)
         alphaSlider:SetValue(1.0)
-        UIDropDownMenu_SetText(textureDropdown, "Spark")
+        UIDropDownMenu_SetText(textureDropdown, "Star")
+        UIDropDownMenu_SetText(gradientDropdown, "Fire")
         colorButton.texture:SetColorTexture(1, 1, 1)
+        colorButton:Enable()
+        colorButton:SetAlpha(1)
+        colorLabel:SetTextColor(1, 1, 1)
         
         InitializeTrailFrames()
         RefreshTrailParticles()
