@@ -1,6 +1,6 @@
 # Jar's Cursor Trails  
 
-Small Cursoir trail addon for Midnight
+Small Cursor trail addon for Midnight
 
 Includes a lot of options for particle effect length, duration, etc. 
 
