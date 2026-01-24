@@ -20,8 +20,16 @@ JarsCursorTrailDB = JarsCursorTrailDB or {
     color = {r = 1, g = 1, b = 1},
     alpha = 1.0,
     rainbowMode = false,
-    gradientType = "Fire"
+    gradientType = "Fire",
+    customColor1 = {r = 1, g = 0, b = 0},
+    customColor2 = {r = 1, g = 1, b = 0},
+    customColor3 = {r = 0, g = 0, b = 1}
 }
+
+-- Initialize new fields for existing users
+JarsCursorTrailDB.customColor1 = JarsCursorTrailDB.customColor1 or {r = 1, g = 0, b = 0}
+JarsCursorTrailDB.customColor2 = JarsCursorTrailDB.customColor2 or {r = 1, g = 1, b = 0}
+JarsCursorTrailDB.customColor3 = JarsCursorTrailDB.customColor3 or {r = 0, g = 0, b = 1}
 
 -- Available textures
 local textures = {
@@ -92,16 +100,12 @@ local gradients = {
         end
     end,
     ["Ice"] = function(position)
-        -- Cyan → Blue → Purple → Blue → Cyan
+        -- Cyan → White → Cyan (frosty)
         -- Mirror at halfway point
         local t = position <= 0.5 and (position * 2) or (2 - position * 2)
-        if t < 0.5 then
-            local s = t * 2
-            return 1-s, 1, 1  -- Cyan to Blue
-        else
-            local s = (t - 0.5) * 2
-            return 0.5*s, 0, 1  -- Blue to Purple
-        end
+        -- Interpolate from cyan (0,1,1) to white (1,1,1)
+        local r = t
+        return r, 1, 1
     end,
     ["Toxic"] = function(position)
         -- Green → Yellow → Green
@@ -110,15 +114,34 @@ local gradients = {
         return t, 1, 0
     end,
     ["Arcane"] = function(position)
-        -- Purple → Pink → Blue → Pink → Purple
+        -- Purple → Magenta → Purple (arcane magic)
         -- Mirror at halfway point
         local t = position <= 0.5 and (position * 2) or (2 - position * 2)
+        -- Interpolate from purple (0.5,0,1) to magenta (1,0,1)
+        local r = 0.5 + (t * 0.5)
+        return r, 0, 1
+    end,
+    ["Custom"] = function(position)
+        -- Blend between 3 custom colors: Color1 → Color2 → Color3 → Color2 → Color1
+        -- Mirror at halfway point
+        local t = position <= 0.5 and (position * 2) or (2 - position * 2)
+        
+        local c1 = JarsCursorTrailDB.customColor1
+        local c2 = JarsCursorTrailDB.customColor2
+        local c3 = JarsCursorTrailDB.customColor3
+        
         if t < 0.5 then
-            local s = t * 2
-            return 0.5 + s*0.5, 0, 1  -- Purple to Pink
+            -- Blend from color1 to color2
+            local blend = t * 2
+            return c1.r + (c2.r - c1.r) * blend,
+                   c1.g + (c2.g - c1.g) * blend,
+                   c1.b + (c2.b - c1.b) * blend
         else
-            local s = (t - 0.5) * 2
-            return 1-s*0.5, 0, 1  -- Pink to Blue
+            -- Blend from color2 to color3
+            local blend = (t - 0.5) * 2
+            return c2.r + (c3.r - c2.r) * blend,
+                   c2.g + (c3.g - c2.g) * blend,
+                   c2.b + (c3.b - c2.b) * blend
         end
     end,
 }
@@ -286,8 +309,13 @@ end
 local function CreateConfigWindow()
     if configFrame then return configFrame end
     
+    -- Initialize custom colors if missing (for existing users)
+    JarsCursorTrailDB.customColor1 = JarsCursorTrailDB.customColor1 or {r = 1, g = 0, b = 0}
+    JarsCursorTrailDB.customColor2 = JarsCursorTrailDB.customColor2 or {r = 1, g = 1, b = 0}
+    JarsCursorTrailDB.customColor3 = JarsCursorTrailDB.customColor3 or {r = 0, g = 0, b = 1}
+    
     configFrame = CreateFrame("Frame", "JarsCursorTrailConfig", UIParent, "BasicFrameTemplateWithInset")
-    configFrame:SetSize(400, 650)
+    configFrame:SetSize(400, 750)
     configFrame:SetPoint("CENTER")
     configFrame:SetMovable(true)
     configFrame:EnableMouse(true)
@@ -389,9 +417,9 @@ local function CreateConfigWindow()
     
     local spacingSlider = CreateFrame("Slider", nil, configFrame, "OptionsSliderTemplate")
     spacingSlider:SetPoint("TOPLEFT", 20, yOffset - 20)
-    spacingSlider:SetMinMaxValues(5, 50)
+    spacingSlider:SetMinMaxValues(1, 50)
     spacingSlider:SetValue(JarsCursorTrailDB.spacing)
-    spacingSlider:SetValueStep(5)
+    spacingSlider:SetValueStep(1)
     spacingSlider:SetObeyStepOnDrag(true)
     spacingSlider:SetWidth(350)
     spacingSlider.Text:SetText("Spacing: " .. JarsCursorTrailDB.spacing)
@@ -556,15 +584,146 @@ local function CreateConfigWindow()
     UIDropDownMenu_SetWidth(gradientDropdown, 150)
     UIDropDownMenu_SetText(gradientDropdown, JarsCursorTrailDB.gradientType)
     
+    yOffset = yOffset - 65
+    
+    -- Custom gradient color pickers (declare before GradientDropdown_OnClick)
+    local customColorsLabel = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    customColorsLabel:SetPoint("TOPLEFT", 20, yOffset)
+    customColorsLabel:SetText("Custom Colors:")
+    
+    -- Custom Color 1
+    local customColor1Button = CreateFrame("Button", nil, configFrame)
+    customColor1Button:SetSize(60, 25)
+    customColor1Button:SetPoint("TOPLEFT", 130, yOffset)
+    customColor1Button.texture = customColor1Button:CreateTexture(nil, "BACKGROUND")
+    customColor1Button.texture:SetAllPoints()
+    customColor1Button.texture:SetColorTexture(
+        JarsCursorTrailDB.customColor1.r,
+        JarsCursorTrailDB.customColor1.g,
+        JarsCursorTrailDB.customColor1.b
+    )
+    customColor1Button:SetScript("OnClick", function(self)
+        local info = {
+            r = JarsCursorTrailDB.customColor1.r,
+            g = JarsCursorTrailDB.customColor1.g,
+            b = JarsCursorTrailDB.customColor1.b,
+            hasOpacity = false,
+            swatchFunc = function()
+                local r, g, b = ColorPickerFrame:GetColorRGB()
+                JarsCursorTrailDB.customColor1.r = r
+                JarsCursorTrailDB.customColor1.g = g
+                JarsCursorTrailDB.customColor1.b = b
+                self.texture:SetColorTexture(r, g, b)
+                RefreshTrailParticles()
+            end,
+            cancelFunc = function(prev)
+                JarsCursorTrailDB.customColor1.r = prev.r
+                JarsCursorTrailDB.customColor1.g = prev.g
+                JarsCursorTrailDB.customColor1.b = prev.b
+                self.texture:SetColorTexture(prev.r, prev.g, prev.b)
+                RefreshTrailParticles()
+            end,
+        }
+        ColorPickerFrame:SetupColorPickerAndShow(info)
+    end)
+    
+    -- Custom Color 2
+    local customColor2Button = CreateFrame("Button", nil, configFrame)
+    customColor2Button:SetSize(60, 25)
+    customColor2Button:SetPoint("LEFT", customColor1Button, "RIGHT", 10, 0)
+    customColor2Button.texture = customColor2Button:CreateTexture(nil, "BACKGROUND")
+    customColor2Button.texture:SetAllPoints()
+    customColor2Button.texture:SetColorTexture(
+        JarsCursorTrailDB.customColor2.r,
+        JarsCursorTrailDB.customColor2.g,
+        JarsCursorTrailDB.customColor2.b
+    )
+    customColor2Button:SetScript("OnClick", function(self)
+        local info = {
+            r = JarsCursorTrailDB.customColor2.r,
+            g = JarsCursorTrailDB.customColor2.g,
+            b = JarsCursorTrailDB.customColor2.b,
+            hasOpacity = false,
+            swatchFunc = function()
+                local r, g, b = ColorPickerFrame:GetColorRGB()
+                JarsCursorTrailDB.customColor2.r = r
+                JarsCursorTrailDB.customColor2.g = g
+                JarsCursorTrailDB.customColor2.b = b
+                self.texture:SetColorTexture(r, g, b)
+                RefreshTrailParticles()
+            end,
+            cancelFunc = function(prev)
+                JarsCursorTrailDB.customColor2.r = prev.r
+                JarsCursorTrailDB.customColor2.g = prev.g
+                JarsCursorTrailDB.customColor2.b = prev.b
+                self.texture:SetColorTexture(prev.r, prev.g, prev.b)
+                RefreshTrailParticles()
+            end,
+        }
+        ColorPickerFrame:SetupColorPickerAndShow(info)
+    end)
+    
+    -- Custom Color 3
+    local customColor3Button = CreateFrame("Button", nil, configFrame)
+    customColor3Button:SetSize(60, 25)
+    customColor3Button:SetPoint("LEFT", customColor2Button, "RIGHT", 10, 0)
+    customColor3Button.texture = customColor3Button:CreateTexture(nil, "BACKGROUND")
+    customColor3Button.texture:SetAllPoints()
+    customColor3Button.texture:SetColorTexture(
+        JarsCursorTrailDB.customColor3.r,
+        JarsCursorTrailDB.customColor3.g,
+        JarsCursorTrailDB.customColor3.b
+    )
+    customColor3Button:SetScript("OnClick", function(self)
+        local info = {
+            r = JarsCursorTrailDB.customColor3.r,
+            g = JarsCursorTrailDB.customColor3.g,
+            b = JarsCursorTrailDB.customColor3.b,
+            hasOpacity = false,
+            swatchFunc = function()
+                local r, g, b = ColorPickerFrame:GetColorRGB()
+                JarsCursorTrailDB.customColor3.r = r
+                JarsCursorTrailDB.customColor3.g = g
+                JarsCursorTrailDB.customColor3.b = b
+                self.texture:SetColorTexture(r, g, b)
+                RefreshTrailParticles()
+            end,
+            cancelFunc = function(prev)
+                JarsCursorTrailDB.customColor3.r = prev.r
+                JarsCursorTrailDB.customColor3.g = prev.g
+                JarsCursorTrailDB.customColor3.b = prev.b
+                self.texture:SetColorTexture(prev.r, prev.g, prev.b)
+                RefreshTrailParticles()
+            end,
+        }
+        ColorPickerFrame:SetupColorPickerAndShow(info)
+    end)
+    
+    -- Initially hide custom colors if not in Custom mode
+    local showCustom = (JarsCursorTrailDB.gradientType == "Custom")
+    customColorsLabel:SetShown(showCustom)
+    customColor1Button:SetShown(showCustom)
+    customColor2Button:SetShown(showCustom)
+    customColor3Button:SetShown(showCustom)
+    
+    -- Gradient dropdown callbacks (defined after custom color buttons exist)
     local function GradientDropdown_OnClick(self)
         JarsCursorTrailDB.gradientType = self.value
         UIDropDownMenu_SetText(gradientDropdown, self.value)
+        
+        -- Show/hide custom color pickers based on gradient type
+        local showCustom = (self.value == "Custom")
+        customColorsLabel:SetShown(showCustom)
+        customColor1Button:SetShown(showCustom)
+        customColor2Button:SetShown(showCustom)
+        customColor3Button:SetShown(showCustom)
+        
         RefreshTrailParticles()
     end
     
     local function GradientDropdown_Initialize(self, level)
         local info = UIDropDownMenu_CreateInfo()
-        local gradientNames = {"Fire", "Ice", "Toxic", "Arcane"}
+        local gradientNames = {"Fire", "Ice", "Toxic", "Arcane", "Custom"}
         for _, name in ipairs(gradientNames) do
             info.text = name
             info.value = name
@@ -576,7 +735,7 @@ local function CreateConfigWindow()
     
     UIDropDownMenu_Initialize(gradientDropdown, GradientDropdown_Initialize)
     
-    yOffset = yOffset - 65
+    yOffset = yOffset - 60
     
     -- Alpha slider
     local alphaLabel = configFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -617,6 +776,9 @@ local function CreateConfigWindow()
         JarsCursorTrailDB.alpha = 1.0
         JarsCursorTrailDB.rainbowMode = false
         JarsCursorTrailDB.gradientType = "Fire"
+        JarsCursorTrailDB.customColor1 = {r = 1, g = 0, b = 0}
+        JarsCursorTrailDB.customColor2 = {r = 1, g = 1, b = 0}
+        JarsCursorTrailDB.customColor3 = {r = 0, g = 0, b = 1}
         
         -- Update UI
         enableCheck:SetChecked(true)
@@ -633,6 +795,13 @@ local function CreateConfigWindow()
         UIDropDownMenu_SetText(textureDropdown, "Star")
         UIDropDownMenu_SetText(gradientDropdown, "Fire")
         colorButton.texture:SetColorTexture(1, 1, 1)
+        customColor1Button.texture:SetColorTexture(1, 0, 0)
+        customColor2Button.texture:SetColorTexture(1, 1, 0)
+        customColor3Button.texture:SetColorTexture(0, 0, 1)
+        customColorsLabel:SetShown(false)
+        customColor1Button:SetShown(false)
+        customColor2Button:SetShown(false)
+        customColor3Button:SetShown(false)
         colorButton:Enable()
         colorButton:SetAlpha(1)
         colorLabel:SetTextColor(1, 1, 1)
