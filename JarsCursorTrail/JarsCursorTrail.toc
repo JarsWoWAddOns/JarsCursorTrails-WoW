@@ -1,0 +1,8 @@
+## Interface: 120000
+## Title: Jar's Cursor Trail
+## Notes: Adds customizable visual trails to your mouse cursor
+## Author: Jar
+## Version: 1.0
+## SavedVariablesPerCharacter: JarsCursorTrailDB
+
+JarsCursorTrail.lua
