@@ -470,30 +470,20 @@ local function CreateConfigWindow()
     textureLabel:SetPoint("TOPLEFT", 20, yOffset)
     textureLabel:SetText("Trail Effect:")
     
-    local textureDropdown = CreateFrame("Frame", nil, configFrame, "UIDropDownMenuTemplate")
-    textureDropdown:SetPoint("TOPLEFT", 10, yOffset - 25)
-    
-    UIDropDownMenu_SetWidth(textureDropdown, 150)
-    UIDropDownMenu_SetText(textureDropdown, JarsCursorTrailDB.texture)
-    
-    local function TextureDropdown_OnClick(self)
-        JarsCursorTrailDB.texture = self.value
-        UIDropDownMenu_SetText(textureDropdown, self.value)
-        RefreshTrailParticles()
-    end
-    
-    local function TextureDropdown_Initialize(self, level)
-        local info = UIDropDownMenu_CreateInfo()
+    local textureDropdown = CreateFrame("DropdownButton", nil, configFrame, "WowStyle1DropdownTemplate")
+    textureDropdown:SetPoint("TOPLEFT", 20, yOffset - 25)
+    textureDropdown:SetWidth(180)
+    textureDropdown:SetDefaultText(JarsCursorTrailDB.texture or "Star")
+    textureDropdown:SetupMenu(function(_, rootDescription)
         for name, _ in pairs(textures) do
-            info.text = name
-            info.value = name
-            info.func = TextureDropdown_OnClick
-            info.checked = (JarsCursorTrailDB.texture == name)
-            UIDropDownMenu_AddButton(info, level)
+            rootDescription:CreateRadio(name,
+                function() return JarsCursorTrailDB.texture == name end,
+                function()
+                    JarsCursorTrailDB.texture = name
+                    RefreshTrailParticles()
+                end)
         end
-    end
-    
-    UIDropDownMenu_Initialize(textureDropdown, TextureDropdown_Initialize)
+    end)
     
     yOffset = yOffset - 65
     
@@ -578,11 +568,10 @@ local function CreateConfigWindow()
     gradientLabel:SetPoint("TOPLEFT", 20, yOffset)
     gradientLabel:SetText("Gradient Type:")
     
-    local gradientDropdown = CreateFrame("Frame", nil, configFrame, "UIDropDownMenuTemplate")
-    gradientDropdown:SetPoint("TOPLEFT", 10, yOffset - 25)
-    
-    UIDropDownMenu_SetWidth(gradientDropdown, 150)
-    UIDropDownMenu_SetText(gradientDropdown, JarsCursorTrailDB.gradientType)
+    local gradientDropdown = CreateFrame("DropdownButton", nil, configFrame, "WowStyle1DropdownTemplate")
+    gradientDropdown:SetPoint("TOPLEFT", 20, yOffset - 25)
+    gradientDropdown:SetWidth(180)
+    gradientDropdown:SetDefaultText(JarsCursorTrailDB.gradientType or "Fire")
     
     yOffset = yOffset - 65
     
@@ -706,34 +695,23 @@ local function CreateConfigWindow()
     customColor2Button:SetShown(showCustom)
     customColor3Button:SetShown(showCustom)
     
-    -- Gradient dropdown callbacks (defined after custom color buttons exist)
-    local function GradientDropdown_OnClick(self)
-        JarsCursorTrailDB.gradientType = self.value
-        UIDropDownMenu_SetText(gradientDropdown, self.value)
-        
-        -- Show/hide custom color pickers based on gradient type
-        local showCustom = (self.value == "Custom")
-        customColorsLabel:SetShown(showCustom)
-        customColor1Button:SetShown(showCustom)
-        customColor2Button:SetShown(showCustom)
-        customColor3Button:SetShown(showCustom)
-        
-        RefreshTrailParticles()
-    end
-    
-    local function GradientDropdown_Initialize(self, level)
-        local info = UIDropDownMenu_CreateInfo()
+    -- Gradient dropdown setup (defined after custom color buttons exist)
+    gradientDropdown:SetupMenu(function(_, rootDescription)
         local gradientNames = {"Fire", "Ice", "Toxic", "Arcane", "Custom"}
         for _, name in ipairs(gradientNames) do
-            info.text = name
-            info.value = name
-            info.func = GradientDropdown_OnClick
-            info.checked = (JarsCursorTrailDB.gradientType == name)
-            UIDropDownMenu_AddButton(info, level)
+            rootDescription:CreateRadio(name,
+                function() return JarsCursorTrailDB.gradientType == name end,
+                function()
+                    JarsCursorTrailDB.gradientType = name
+                    local showCustom = (name == "Custom")
+                    customColorsLabel:SetShown(showCustom)
+                    customColor1Button:SetShown(showCustom)
+                    customColor2Button:SetShown(showCustom)
+                    customColor3Button:SetShown(showCustom)
+                    RefreshTrailParticles()
+                end)
         end
-    end
-    
-    UIDropDownMenu_Initialize(gradientDropdown, GradientDropdown_Initialize)
+    end)
     
     yOffset = yOffset - 60
     
@@ -792,8 +770,8 @@ local function CreateConfigWindow()
         offsetXSlider:SetValue(0)
         offsetYSlider:SetValue(0)
         alphaSlider:SetValue(1.0)
-        UIDropDownMenu_SetText(textureDropdown, "Star")
-        UIDropDownMenu_SetText(gradientDropdown, "Fire")
+        textureDropdown:GenerateMenu()
+        gradientDropdown:GenerateMenu()
         colorButton.texture:SetColorTexture(1, 1, 1)
         customColor1Button.texture:SetColorTexture(1, 0, 0)
         customColor2Button.texture:SetColorTexture(1, 1, 0)
@@ -821,8 +799,13 @@ local function Initialize()
     
     -- Create update frame
     updateFrame = CreateFrame("Frame")
+    local trailTimer = 0
     updateFrame:SetScript("OnUpdate", function(self, elapsed)
-        UpdateTrail()
+        trailTimer = trailTimer + elapsed
+        if trailTimer >= JarsCursorTrailDB.updateInterval then
+            trailTimer = 0
+            UpdateTrail()
+        end
     end)
     
     print("|cff00ff00Jar's Cursor Trail loaded! Type |r|cffFFFF00/jct|r|cff00ff00 to configure.|r")
