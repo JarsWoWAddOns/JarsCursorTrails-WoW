@@ -35,17 +35,17 @@ JarsCursorTrailDB.customColor3 = JarsCursorTrailDB.customColor3 or {r = 0, g = 0
 local UI = {
     bg        = { 0.10, 0.10, 0.12, 0.95 },
     header    = { 0.13, 0.13, 0.16, 1 },
-    accent    = { 0.30, 0.75, 0.75, 1 },
-    accentDim = { 0.20, 0.50, 0.50, 1 },
+    accent    = { 1.0,  0.55, 0.0,  1 },
+    accentDim = { 0.70, 0.35, 0.0,  1 },
     text      = { 0.90, 0.90, 0.90, 1 },
     textDim   = { 0.55, 0.55, 0.58, 1 },
     border    = { 0.22, 0.22, 0.26, 1 },
     sliderBg  = { 0.18, 0.18, 0.22, 1 },
-    sliderFill= { 0.30, 0.75, 0.75, 0.6 },
+    sliderFill= { 1.0,  0.55, 0.0,  0.6 },
     btnNormal = { 0.18, 0.18, 0.22, 1 },
     btnHover  = { 0.24, 0.24, 0.28, 1 },
     btnPress  = { 0.14, 0.14, 0.17, 1 },
-    checkOn   = { 0.30, 0.75, 0.75, 1 },
+    checkOn   = { 1.0,  0.55, 0.0,  1 },
     checkOff  = { 0.22, 0.22, 0.26, 1 },
 }
 
