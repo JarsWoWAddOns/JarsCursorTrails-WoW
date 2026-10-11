@@ -5,9 +5,11 @@ local trailFrames = {}
 local updateFrame
 local lastX, lastY = 0, 0
 local trailIndex = 1
+local trailTimer = 0
+local MAX_PARTICLES = 50
 
--- Saved variables with defaults
-JarsCursorTrailDB = JarsCursorTrailDB or {
+-- Saved variable defaults, merged in at ADDON_LOADED
+local DEFAULTS = {
     enabled = true,
     trailLength = 10,
     fadeTime = 0.5,
@@ -26,10 +28,13 @@ JarsCursorTrailDB = JarsCursorTrailDB or {
     customColor3 = {r = 0, g = 0, b = 1}
 }
 
--- Initialize new fields for existing users
-JarsCursorTrailDB.customColor1 = JarsCursorTrailDB.customColor1 or {r = 1, g = 0, b = 0}
-JarsCursorTrailDB.customColor2 = JarsCursorTrailDB.customColor2 or {r = 1, g = 1, b = 0}
-JarsCursorTrailDB.customColor3 = JarsCursorTrailDB.customColor3 or {r = 0, g = 0, b = 1}
+-- color tables need a fresh copy or they'd share with DEFAULTS
+local function CopyDefault(v)
+    if type(v) ~= "table" then return v end
+    local t = {}
+    for k, x in pairs(v) do t[k] = x end
+    return t
+end
 
 -- Modern dark UI color palette
 local UI = {
@@ -201,9 +206,10 @@ local function CreateTrailParticle(index)
     -- Store particle index for gradient coloring
     frame.particleIndex = index
     
-    -- Create texture
+    -- Create texture (sized directly so fade shrink doesnt resize the frame)
     frame.texture = frame:CreateTexture(nil, "OVERLAY")
-    frame.texture:SetAllPoints()
+    frame.texture:SetPoint("CENTER")
+    frame.texture:SetSize(JarsCursorTrailDB.size, JarsCursorTrailDB.size)
     frame.texture:SetTexture(GetCurrentTexture())
     frame.texture:SetBlendMode("ADD")
     
@@ -221,19 +227,22 @@ local function CreateTrailParticle(index)
     return frame
 end
 
--- Initialize trail frames pool
+-- One pool at max length, built once
 local function InitializeTrailFrames()
-    -- Clear existing frames
-    for _, frame in ipairs(trailFrames) do
-        frame:Hide()
-        frame:SetParent(nil)
-    end
-    trailFrames = {}
-    
-    -- Create new pool with index for gradient
-    for i = 1, JarsCursorTrailDB.trailLength do
+    if #trailFrames > 0 then return end
+    for i = 1, MAX_PARTICLES do
         trailFrames[i] = CreateTrailParticle(i)
     end
+end
+
+-- length change just hides the extras
+local function SetTrailLength(n)
+    n = math.min(math.max(math.floor(n), 1), MAX_PARTICLES)
+    JarsCursorTrailDB.trailLength = n
+    for i = n + 1, #trailFrames do
+        trailFrames[i]:Hide()
+    end
+    if trailIndex > n then trailIndex = 1 end
 end
 
 -- Update trail particle positions and fade
@@ -301,12 +310,40 @@ local function UpdateTrail()
                 
                 -- Optional: scale down as it fades
                 local scale = 1 - (fadeProgress * 0.3)
-                frame:SetSize(
-                    JarsCursorTrailDB.size * scale,
-                    JarsCursorTrailDB.size * scale
-                )
+                -- frame:SetSize(
+                --     JarsCursorTrailDB.size * scale,
+                --     JarsCursorTrailDB.size * scale
+                -- )
+                local sz = JarsCursorTrailDB.size * scale
+                frame.texture:SetSize(sz, sz)
             end
         end
+    end
+end
+
+local function OnUpdate(self, elapsed)
+    trailTimer = trailTimer + elapsed
+    local interval = JarsCursorTrailDB.updateInterval
+    if trailTimer >= interval then
+        trailTimer = trailTimer - interval
+        UpdateTrail()
+    end
+end
+
+-- checkbox and /jct toggle both go thru here
+local function SetTrailEnabled(val)
+    JarsCursorTrailDB.enabled = val
+    if not val then
+        for _, frame in ipairs(trailFrames) do
+            frame:Hide()
+        end
+    end
+    if updateFrame then
+        trailTimer = 0
+        updateFrame:SetScript("OnUpdate", val and OnUpdate or nil)
+    end
+    if configFrame then
+        configFrame.enableCheck:SetChecked(val)
     end
 end
 
@@ -326,6 +363,7 @@ local function RefreshTrailParticles()
         end
         
         frame:SetSize(JarsCursorTrailDB.size, JarsCursorTrailDB.size)
+        frame.texture:SetSize(JarsCursorTrailDB.size, JarsCursorTrailDB.size)
     end
 end
 
@@ -488,11 +526,6 @@ end
 local function CreateConfigWindow()
     if configFrame then return configFrame end
     
-    -- Initialize custom colors if missing (for existing users)
-    JarsCursorTrailDB.customColor1 = JarsCursorTrailDB.customColor1 or {r = 1, g = 0, b = 0}
-    JarsCursorTrailDB.customColor2 = JarsCursorTrailDB.customColor2 or {r = 1, g = 1, b = 0}
-    JarsCursorTrailDB.customColor3 = JarsCursorTrailDB.customColor3 or {r = 0, g = 0, b = 1}
-    
     configFrame = CreateFrame("Frame", "JarsCursorTrailConfig", UIParent, "BackdropTemplate")
     configFrame:SetSize(460, 700)
     configFrame:SetPoint("CENTER")
@@ -559,15 +592,9 @@ local function CreateConfigWindow()
     sec1:SetSize(contentWidth, 20)
     sec1:SetPoint("TOPLEFT", 0, nextY(0))
 
-    local enableCheck = CreateModernCheck(scrollChild, "Enable Trail", JarsCursorTrailDB.enabled, function(val)
-        JarsCursorTrailDB.enabled = val
-        if not val then
-            for _, frame in ipairs(trailFrames) do
-                frame:Hide()
-            end
-        end
-    end)
+    local enableCheck = CreateModernCheck(scrollChild, "Enable Trail", JarsCursorTrailDB.enabled, SetTrailEnabled)
     enableCheck:SetPoint("TOPLEFT", 0, nextY(28))
+    configFrame.enableCheck = enableCheck
 
     -- =====================
     -- APPEARANCE SECTION
@@ -581,8 +608,7 @@ local function CreateConfigWindow()
         5, 50, JarsCursorTrailDB.trailLength, 1, contentWidth,
         function(v) return tostring(math.floor(v)) end,
         function(value)
-            JarsCursorTrailDB.trailLength = math.floor(value)
-            InitializeTrailFrames()
+            SetTrailLength(value)
         end)
     lengthSlider:SetPoint("TOPLEFT", 0, nextY(28))
 
@@ -713,11 +739,8 @@ local function CreateConfigWindow()
         })
     end)
 
-    -- Rainbow mode checkbox
-    local rainbowCheck = CreateModernCheck(scrollChild, "Rainbow/Gradient Mode", JarsCursorTrailDB.rainbowMode, function(val)
-        JarsCursorTrailDB.rainbowMode = val
-        RefreshTrailParticles()
-        -- Enable/disable color button
+    -- Enable/disable color button
+    local function ApplyRainbowState(val)
         if val then
             colorButton:Disable()
             colorButton:SetAlpha(0.5)
@@ -727,15 +750,18 @@ local function CreateConfigWindow()
             colorButton:SetAlpha(1)
             colorLabel:SetTextColor(unpack(UI.text))
         end
+    end
+
+    -- Rainbow mode checkbox
+    local rainbowCheck = CreateModernCheck(scrollChild, "Rainbow/Gradient Mode", JarsCursorTrailDB.rainbowMode, function(val)
+        JarsCursorTrailDB.rainbowMode = val
+        RefreshTrailParticles()
+        ApplyRainbowState(val)
     end)
     rainbowCheck:SetPoint("TOPLEFT", 0, nextY(30))
 
     -- Set initial state based on rainbow mode
-    if JarsCursorTrailDB.rainbowMode then
-        colorButton:Disable()
-        colorButton:SetAlpha(0.5)
-        colorLabel:SetTextColor(0.5, 0.5, 0.5)
-    end
+    ApplyRainbowState(JarsCursorTrailDB.rainbowMode)
 
     -- Gradient Type dropdown
     local gradientLabel = scrollChild:CreateFontString(nil, "OVERLAY")
@@ -830,26 +856,25 @@ local function CreateConfigWindow()
         })
     end)
 
+    local function ShowCustomColors(show)
+        customColorsLabel:SetShown(show)
+        customColor1Button:SetShown(show)
+        customColor2Button:SetShown(show)
+        customColor3Button:SetShown(show)
+    end
+
     -- Initially hide custom colors if not in Custom mode
-    local showCustom = (JarsCursorTrailDB.gradientType == "Custom")
-    customColorsLabel:SetShown(showCustom)
-    customColor1Button:SetShown(showCustom)
-    customColor2Button:SetShown(showCustom)
-    customColor3Button:SetShown(showCustom)
+    ShowCustomColors(JarsCursorTrailDB.gradientType == "Custom")
 
     -- Gradient dropdown setup (defined after custom color buttons exist)
     gradientDropdown:SetupMenu(function(_, rootDescription)
-        local gradientNames = {"Fire", "Ice", "Toxic", "Arcane", "Custom"}
+        local gradientNames = {"Rainbow", "Fire", "Ice", "Toxic", "Arcane", "Custom"}
         for _, name in ipairs(gradientNames) do
             rootDescription:CreateRadio(name,
                 function() return JarsCursorTrailDB.gradientType == name end,
                 function()
                     JarsCursorTrailDB.gradientType = name
-                    local showCustom = (name == "Custom")
-                    customColorsLabel:SetShown(showCustom)
-                    customColor1Button:SetShown(showCustom)
-                    customColor2Button:SetShown(showCustom)
-                    customColor3Button:SetShown(showCustom)
+                    ShowCustomColors(name == "Custom")
                     RefreshTrailParticles()
                 end)
         end
@@ -862,31 +887,38 @@ local function CreateConfigWindow()
     sec5:SetSize(contentWidth, 20)
     sec5:SetPoint("TOPLEFT", 0, nextY(36))
 
+    -- push db values back into the widgets we already have
+    local function RefreshWidgets()
+        local db = JarsCursorTrailDB
+        enableCheck:SetChecked(db.enabled)
+        lengthSlider.slider:SetValue(db.trailLength)
+        fadeSlider.slider:SetValue(db.fadeTime)
+        sizeSlider.slider:SetValue(db.size)
+        spacingSlider.slider:SetValue(db.spacing)
+        alphaSlider.slider:SetValue(db.alpha)
+        offsetXSlider.slider:SetValue(db.offsetX)
+        offsetYSlider.slider:SetValue(db.offsetY)
+        textureDropdown:GenerateMenu()
+        gradientDropdown:GenerateMenu()
+        colorButton:SetBackdropColor(db.color.r, db.color.g, db.color.b, 1)
+        rainbowCheck:SetChecked(db.rainbowMode)
+        ApplyRainbowState(db.rainbowMode)
+        customColor1Button:SetBackdropColor(db.customColor1.r, db.customColor1.g, db.customColor1.b, 1)
+        customColor2Button:SetBackdropColor(db.customColor2.r, db.customColor2.g, db.customColor2.b, 1)
+        customColor3Button:SetBackdropColor(db.customColor3.r, db.customColor3.g, db.customColor3.b, 1)
+        ShowCustomColors(db.gradientType == "Custom")
+    end
+
     local resetBtn = CreateModernButton(scrollChild, "Reset to Default", 160, 30, function()
-        JarsCursorTrailDB.enabled = true
-        JarsCursorTrailDB.trailLength = 10
-        JarsCursorTrailDB.fadeTime = 0.5
-        JarsCursorTrailDB.texture = "Star"
-        JarsCursorTrailDB.size = 32
-        JarsCursorTrailDB.spacing = 20
-        JarsCursorTrailDB.offsetX = 0
-        JarsCursorTrailDB.offsetY = 0
-        JarsCursorTrailDB.color = {r = 1, g = 1, b = 1}
-        JarsCursorTrailDB.alpha = 1.0
-        JarsCursorTrailDB.rainbowMode = false
-        JarsCursorTrailDB.gradientType = "Fire"
-        JarsCursorTrailDB.customColor1 = {r = 1, g = 0, b = 0}
-        JarsCursorTrailDB.customColor2 = {r = 1, g = 1, b = 0}
-        JarsCursorTrailDB.customColor3 = {r = 0, g = 0, b = 1}
-        
-        InitializeTrailFrames()
+        for k, v in pairs(DEFAULTS) do
+            JarsCursorTrailDB[k] = CopyDefault(v)
+        end
+
+        SetTrailEnabled(JarsCursorTrailDB.enabled)
+        SetTrailLength(JarsCursorTrailDB.trailLength)
         RefreshTrailParticles()
+        RefreshWidgets()
         print("JarsCursorTrail: Settings reset to defaults")
-        
-        -- Close and reopen to refresh UI
-        configFrame:Hide()
-        configFrame = nil
-        CreateConfigWindow():Show()
     end)
     resetBtn:SetPoint("TOPLEFT", 0, nextY(28))
 
@@ -901,17 +933,10 @@ local function Initialize()
     -- Initialize trail frames
     InitializeTrailFrames()
     
-    -- Create update frame
+    -- Create update frame, OnUpdate only runs while enabled
     updateFrame = CreateFrame("Frame")
-    local trailTimer = 0
-    updateFrame:SetScript("OnUpdate", function(self, elapsed)
-        trailTimer = trailTimer + elapsed
-        if trailTimer >= JarsCursorTrailDB.updateInterval then
-            trailTimer = 0
-            UpdateTrail()
-        end
-    end)
-    
+    SetTrailEnabled(JarsCursorTrailDB.enabled)
+
     print("|cff00ff00Jar's Cursor Trail loaded! Type |r|cffFFFF00/jct|r|cff00ff00 to configure.|r")
 end
 
@@ -922,7 +947,7 @@ SlashCmdList["JARSCURSORTRAIL"] = function(msg)
     msg = msg:lower():trim()
     
     if msg == "toggle" then
-        JarsCursorTrailDB.enabled = not JarsCursorTrailDB.enabled
+        SetTrailEnabled(not JarsCursorTrailDB.enabled)
         print("JarsCursorTrail: " .. (JarsCursorTrailDB.enabled and "Enabled" or "Disabled"))
     else
         local frame = CreateConfigWindow()
@@ -936,9 +961,20 @@ end
 
 -- Event handler
 local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
-eventFrame:SetScript("OnEvent", function(self, event)
-    if event == "PLAYER_LOGIN" then
+eventFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == addonName then
+        -- fill in any missing keys
+        JarsCursorTrailDB = JarsCursorTrailDB or {}
+        for k, v in pairs(DEFAULTS) do
+            if JarsCursorTrailDB[k] == nil then
+                JarsCursorTrailDB[k] = CopyDefault(v)
+            end
+        end
+        JarsCursorTrailDB.trailLength = math.min(JarsCursorTrailDB.trailLength, MAX_PARTICLES)
+        self:UnregisterEvent("ADDON_LOADED")
+    elseif event == "PLAYER_LOGIN" then
         Initialize()
         self:UnregisterEvent("PLAYER_LOGIN")
     end
